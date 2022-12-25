@@ -1,23 +1,26 @@
 version: "3.3"
 
+# Global vars anchors
+x-server-ip: &server-ip
+  SERVER_IP: 127.0.0.1
+
 services:
   server:
     build:
       context: ../
       dockerfile: docker/server/Dockerfile
+    restart: unless-stopped
     ports:
       - 7171:7171
       - 7172:7172
     volumes:
       - ../data:/otxsr/data
     depends_on:
-      - mysql
-      - website
-      - login
-    links:
-      - mysql
+      mysql:
+        condition: service_healthy
     environment:
-      - SERVER_DB_HOST=mysql
+      <<: *server-ip
+      SERVER_DB_HOST: mysql
 
   mysql:
     build:
@@ -29,41 +32,56 @@ services:
       - MYSQL_USER=otserver
       - MYSQL_PASSWORD=otserver
       - MYSQL_RANDOM_ROOT_PASSWORD=yes
+    volumes:
+      - otserver_data:/var/lib/mysql
     ports:
       - 3306:3306
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "--silent"]
+      interval: 5s
 
   website:
-    image: webdevops/php-nginx:alpine-php7
+    build:
+      context: ../
+      dockerfile: docker/data/Dockerfile
     restart: unless-stopped
     environment:
-      - WEB_DOCUMENT_ROOT=/tmp/web/
-      - WEB_DOCUMENT_INDEX=index.php
+      <<: *server-ip
+      WEB_DOCUMENT_ROOT: /tmp/web/
+      WEB_DOCUMENT_INDEX: index.php
     ports:
-      - 8080:80
+      - 80:80
     volumes:
-      - ./docker/data/web:/tmp/web
-      - ./:/tmp/otserver/
+      - ./data/web:/tmp/web
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
 
   login:
     image: opentibiabr/login-server:latest
     restart: unless-stopped
     ports:
-      - 80:8080
+      - 8080:80
+      - 9090:9090
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
     environment:
-      - DB_DATABASE=otxsr
-      - DB_HOSTNAME=mysql
-      - DB_PORT=3306
-      - DB_PASSWORD=otxsr
-      - DB_USERNAME=otxsr
-      - ENV_LOG_LEVEL=verbose
-      - ENV_TYPE=dev
-      - LOGIN_PORT=8080
-      - SERVER_NAME=otxsr
-      - SERVER_LOCATION=USA
-      - SERVER_IP=127.0.0.1
-      - SERVER_PORT=7172
-#      - VOCATIONS -- map your custom vocations here, if needed, comma separated
+      <<: *server-ip
+      MYSQL_DBNAME: otserver
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_PASS: otserver
+      MYSQL_USER: otserver
+      ENV_LOG_LEVEL: verbose
+      LOGIN_HTTP_PORT: 80
+      LOGIN_GRPC_PORT: 9090
+      RATE_LIMITER_BURST: 5
+      RATE_LIMITER_RATE: 2
+      SERVER_NAME: OTXSERVER
+      SERVER_LOCATION: USA
+      SERVER_PORT: 7172
+#      VOCATIONS: voc1,voc2 -- map your custom vocations here
+
+volumes:
+  otserver_data:
